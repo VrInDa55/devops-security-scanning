@@ -1,0 +1,66 @@
+pipeline {
+    agent any
+
+    parameters {
+        string(defaultValue: '', description: 'Enter the image name', name: 'IMAGE_NAME')
+        booleanParam(defaultValue: false, description: '', name: 'ui_app')
+    }
+
+    environment {
+        IMAGE_NAME = 'admin'
+    }
+
+    stages {
+        stage("Checkout") {
+            steps {
+                script {
+                    if (params.ui_app) {
+                        git branch: 'main', credentialsId: 'your-new-credentials-id', url: 'https://github.com/VrInDa55/CGPA-Predictor'
+                    } else {
+                        echo "Please select app in build parameters"
+                    }
+                }
+            }
+        }
+
+        stage("Build Docker Image") {
+            steps {
+                script {
+                    if (params.ui_app) {
+                        sh "docker build -t ${params.IMAGE_NAME} ."
+                    } else {
+                        echo "Please select app name in build with parameters"
+                    }
+                }
+            }
+        }
+
+        stage("Scan Image") {
+            steps {
+                script {
+                    sh """docker run --rm -v /var/lib/jenkins/workspace/pipeline1:/workspace aquasec/trivy image --format json --severity HIGH ${params.IMAGE_NAME} > vulnerabilities.json"""
+                }
+            }
+        }
+
+        stage("Email Notification") {
+            when {
+                expression {
+                    def json = readFile 'vulnerabilities.json'
+                    def vulnerabilities = readJSON text: json
+                    return vulnerabilities.find { it.Severity in ['CRITICAL', 'HIGH'] }
+                }
+            }
+            steps {
+                emailext(
+                    attachmentsPattern: 'vulnerabilities.json',
+                    body: "</p> image scanning report </p>",
+                    mimeType: 'text/html',
+                    recipientProviders: [buildUser(), culprits(), developers(), requestor(), brokenBuildSuspects(), brokenTestSuspects()],
+                    subject: "${env.JOB_NAME}-${BRANCH}-${BUILD_NUMBER}=${currentBuild.currentResult}",
+                    to: 'vrinda1103@gmail.com'
+                )
+            }
+        }
+    }
+}
